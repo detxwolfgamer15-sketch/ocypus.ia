@@ -467,6 +467,9 @@ export default function Home() {
         onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
         activeMode={activeMode}
         onSelectMode={(m) => setActiveMode(m)}
+        onRequestAdmin={handleOpenAdmin}
+        isAdminUnlocked={isAdminUnlocked}
+        onOpenLoginScreen={() => setIsLoginScreenOpen(true)}
       />
 
       {/* Main Body */}
