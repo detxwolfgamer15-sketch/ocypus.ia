@@ -1,0 +1,588 @@
+'use client';
+
+import React, { useState, useEffect, useCallback } from 'react';
+import { 
+  Conversation, 
+  ChatMessage, 
+  UserAccount, 
+  AppMode, 
+  SupportedLanguage, 
+  MessageAttachment,
+  SpreadsheetData,
+  ApkProjectData,
+  GeneratedImageItem,
+  AuditLog,
+  AdminMetrics
+} from '@/lib/types';
+import { 
+  INITIAL_CONVERSATIONS, 
+  INITIAL_USER, 
+  SAMPLE_USERS, 
+  INITIAL_ADMIN_METRICS, 
+  INITIAL_AUDIT_LOGS 
+} from '@/lib/storage';
+import { Header } from '@/components/Header';
+import { Sidebar } from '@/components/Sidebar';
+import { ChatArea } from '@/components/ChatArea';
+import { AdminPanel } from '@/components/AdminPanel';
+import { AuthModal } from '@/components/AuthModal';
+import { PdfUploadModal } from '@/components/PdfUploadModal';
+import { AdminCommandModal } from '@/components/AdminCommandModal';
+import { LoginScreen } from '@/components/LoginScreen';
+import { 
+  syncConversationToSupabase, 
+  syncAuditLogToSupabase, 
+  syncUserToSupabase,
+  getCurrentUserFromSupabase,
+  signOutWithSupabase
+} from '@/lib/supabase';
+
+// External helper functions to guarantee purity during render
+function getNow(): number {
+  return Date.now();
+}
+
+function getTimestamp(): string {
+  return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function getLocaleString(): string {
+  return new Date().toLocaleString('pt-BR');
+}
+
+function getISODate(): string {
+  return new Date().toISOString();
+}
+
+export default function Home() {
+  // Deterministic initial states (identical on SSR and client initial render to prevent hydration mismatch)
+  const [conversations, setConversations] = useState<Conversation[]>(INITIAL_CONVERSATIONS);
+  const [activeConversationId, setActiveConversationId] = useState<string>(INITIAL_CONVERSATIONS[0].id);
+  const [currentUser, setCurrentUser] = useState<UserAccount | null>(INITIAL_USER);
+  const [isAdminUnlocked, setIsAdminUnlocked] = useState<boolean>(false);
+  const [isLoaded, setIsLoaded] = useState<boolean>(false);
+
+  const [users, setUsers] = useState<UserAccount[]>(SAMPLE_USERS);
+  const [metrics, setMetrics] = useState<AdminMetrics>(INITIAL_ADMIN_METRICS);
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>(INITIAL_AUDIT_LOGS);
+
+  const [activeMode, setActiveMode] = useState<AppMode>('general');
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [isImageLoading, setIsImageLoading] = useState<boolean>(false);
+
+  // Modal states
+  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(false);
+  const [isAdminOpen, setIsAdminOpen] = useState<boolean>(false);
+  const [isAdminCommandModalOpen, setIsAdminCommandModalOpen] = useState<boolean>(false);
+  const [isAuthOpen, setIsAuthOpen] = useState<boolean>(false);
+  const [isLoginScreenOpen, setIsLoginScreenOpen] = useState<boolean>(false);
+  const [isPdfModalOpen, setIsPdfModalOpen] = useState<boolean>(false);
+  const [pendingAttachments, setPendingAttachments] = useState<MessageAttachment[]>([]);
+
+  // Safe client-side hydration: load stored state once after mount to eliminate SSR mismatch
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      try {
+        const savedConvs = localStorage.getItem('ocypus_conversations');
+        if (savedConvs) {
+          const parsed = JSON.parse(savedConvs);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setConversations(parsed);
+            const savedActiveId = localStorage.getItem('ocypus_active_conv_id');
+            if (savedActiveId && parsed.some((c: Conversation) => c.id === savedActiveId)) {
+              setActiveConversationId(savedActiveId);
+            } else {
+              setActiveConversationId(parsed[0].id);
+            }
+          }
+        }
+
+        const savedUser = localStorage.getItem('ocypus_user');
+        if (savedUser) {
+          setCurrentUser(JSON.parse(savedUser));
+        }
+
+        const savedUnlocked = localStorage.getItem('ocypus_admin_unlocked');
+        if (savedUnlocked === 'true') {
+          setIsAdminUnlocked(true);
+        }
+
+        // Try recovering live Supabase session user
+        getCurrentUserFromSupabase().then(sbUser => {
+          if (sbUser) {
+            setCurrentUser(sbUser);
+            try {
+              localStorage.setItem('ocypus_user', JSON.stringify(sbUser));
+              if (sbUser.role === 'admin') {
+                setIsAdminUnlocked(true);
+                localStorage.setItem('ocypus_admin_unlocked', 'true');
+              }
+            } catch (err) {
+              console.warn(err);
+            }
+          }
+        }).catch(() => {});
+      } catch (e) {
+        console.warn('Error reading stored state from localStorage:', e);
+      } finally {
+        setIsLoaded(true);
+      }
+    }, 0);
+
+    return () => clearTimeout(timer);
+  }, []);
+
+  // Save conversations to localStorage ONLY after client has loaded
+  useEffect(() => {
+    if (!isLoaded) return;
+    try {
+      localStorage.setItem('ocypus_conversations', JSON.stringify(conversations));
+    } catch (e) {
+      console.warn('Could not save conversations to localStorage', e);
+    }
+  }, [conversations, isLoaded]);
+
+  // Save active conversation id
+  useEffect(() => {
+    if (!isLoaded) return;
+    try {
+      localStorage.setItem('ocypus_active_conv_id', activeConversationId);
+    } catch (e) {
+      console.warn('Could not save active conversation ID', e);
+    }
+  }, [activeConversationId, isLoaded]);
+
+  const activeConversation = conversations.find(c => c.id === activeConversationId) || conversations[0];
+
+  const handleNewConversation = useCallback((mode: AppMode = 'general') => {
+    const newId = `conv_${getNow()}`;
+    const titlesMap: Record<string, string> = {
+      general: 'Nova Conversa Ocypus',
+      apk: 'Novo Projeto APK Android',
+      spreadsheet: 'Nova Planilha Excel',
+      code: 'Novo Script de Código',
+      image: 'Nova Criação Visual'
+    };
+
+    const newConv: Conversation = {
+      id: newId,
+      title: titlesMap[mode] || 'Nova Conversa',
+      createdAt: getISODate(),
+      updatedAt: getISODate(),
+      category: 'Hoje',
+      messages: []
+    };
+
+    setConversations(prev => [newConv, ...prev]);
+    setActiveConversationId(newId);
+    setActiveMode(mode);
+  }, []);
+
+  const handleDeleteConversation = useCallback((id: string) => {
+    setConversations(prev => {
+      const updated = prev.filter(c => c.id !== id);
+      return updated;
+    });
+    setActiveConversationId(prevId => {
+      if (prevId === id) {
+        const remaining = conversations.filter(c => c.id !== id);
+        return remaining.length > 0 ? remaining[0].id : '';
+      }
+      return prevId;
+    });
+  }, [conversations]);
+
+  const handleGenerateImageDirect = useCallback(async (prompt: string, aspectRatio = '1:1') => {
+    setIsImageLoading(true);
+    setIsLoading(true);
+    try {
+      const res = await fetch('/api/generate-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt, aspectRatio })
+      });
+      const data = await res.json();
+
+      const imageItem: GeneratedImageItem = {
+        id: `img_${getNow()}`,
+        url: data.imageUrl || 'https://picsum.photos/1024/1024',
+        prompt,
+        aspectRatio,
+        createdAt: getISODate()
+      };
+
+      const assistantMessage: ChatMessage = {
+        id: `msg_img_${getNow()}`,
+        role: 'assistant',
+        content: `🐺 Imagem criada com sucesso pela IA Ocypus sob a proporção **${aspectRatio}**!`,
+        timestamp: getTimestamp(),
+        mode: 'image',
+        generatedImages: [imageItem]
+      };
+
+      setConversations(prev => prev.map(c => {
+        if (c.id === activeConversationId) {
+          return {
+            ...c,
+            messages: [...c.messages, assistantMessage],
+            updatedAt: getISODate()
+          };
+        }
+        return c;
+      }));
+
+    } catch (err) {
+      console.error('Error generating image:', err);
+    } finally {
+      setIsImageLoading(false);
+      setIsLoading(false);
+    }
+  }, [activeConversationId]);
+
+  const handleOpenAdmin = () => {
+    if (!isAdminUnlocked) {
+      setIsAdminCommandModalOpen(true);
+    } else {
+      setIsAdminOpen(true);
+    }
+  };
+
+  const handleSendMessage = useCallback(async (
+    text: string, 
+    mode: AppMode, 
+    language?: SupportedLanguage, 
+    attachments?: MessageAttachment[]
+  ) => {
+    if (!text.trim() && (!attachments || attachments.length === 0)) return;
+
+    const userMessage: ChatMessage = {
+      id: `msg_${getNow()}`,
+      role: 'user',
+      content: text,
+      timestamp: getTimestamp(),
+      mode,
+      attachments: attachments ? [...attachments] : undefined
+    };
+
+    // Intercept Superadmin secret command: /detxwolf.ADM
+    if (text.trim() === '/detxwolf.ADM') {
+      setIsAdminUnlocked(true);
+      try {
+        localStorage.setItem('ocypus_admin_unlocked', 'true');
+      } catch (e) {
+        console.warn('Could not save admin unlocked to localStorage', e);
+      }
+
+      const adminSuccessMsg: ChatMessage = {
+        id: `msg_adm_${getNow()}`,
+        role: 'assistant',
+        content: '🐺 **ACESSO DE SUPERADMINISTRADOR CONCEDIDO COM SUCESSO!**\n\nO comando de segurança `/detxwolf.ADM` foi autenticado pelo núcleo Ocypus. O Painel de Controle e todas as métricas, monitoramento de usuários, auditoria e sincronização com o banco de dados foram desbloqueados.',
+        timestamp: getTimestamp(),
+        mode: 'general'
+      };
+
+      const updatedMessagesWithAdmin = [...(activeConversation?.messages || []), userMessage, adminSuccessMsg];
+      const updatedConvWithAdmin: Conversation = {
+        ...activeConversation,
+        messages: updatedMessagesWithAdmin,
+        updatedAt: getISODate()
+      };
+
+      setConversations(prev => prev.map(c => c.id === activeConversationId ? updatedConvWithAdmin : c));
+      setPendingAttachments([]);
+      setIsAdminOpen(true);
+      return;
+    }
+
+    // Update conversation with user message
+    const updatedMessages = [...(activeConversation?.messages || []), userMessage];
+    const updatedConv: Conversation = {
+      ...activeConversation,
+      messages: updatedMessages,
+      updatedAt: getISODate(),
+      title: activeConversation.messages.length === 0 ? text.slice(0, 30) + '...' : activeConversation.title
+    };
+
+    setConversations(prev => prev.map(c => c.id === activeConversationId ? updatedConv : c));
+    setPendingAttachments([]);
+
+    // Check if mode is image generation
+    if (mode === 'image') {
+      await handleGenerateImageDirect(text);
+      return;
+    }
+
+    setIsLoading(true);
+    const startTime = getNow();
+
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: text,
+          mode,
+          language,
+          attachments,
+          history: updatedMessages.map(m => ({ role: m.role, content: m.content }))
+        })
+      });
+
+      const data = await res.json();
+      const latency = getNow() - startTime;
+      const rawText: string = data.text || '';
+
+      // Parse special structures (JSON APK or JSON Spreadsheet)
+      let parsedSpreadsheet: SpreadsheetData | undefined;
+      let parsedApk: ApkProjectData | undefined;
+
+      if (rawText.includes('```json:spreadsheet') || rawText.includes('```json:apk')) {
+        const spreadsheetMatch = rawText.match(/```json:spreadsheet\s*([\s\S]*?)```/);
+        if (spreadsheetMatch) {
+          try {
+            parsedSpreadsheet = JSON.parse(spreadsheetMatch[1]);
+          } catch (e) {
+            console.error('Failed to parse spreadsheet JSON', e);
+          }
+        }
+
+        const apkMatch = rawText.match(/```json:apk\s*([\s\S]*?)```/);
+        if (apkMatch) {
+          try {
+            parsedApk = JSON.parse(apkMatch[1]);
+          } catch (e) {
+            console.error('Failed to parse APK project JSON', e);
+          }
+        }
+      }
+
+      // Also check standard json block if mode matches
+      if (!parsedSpreadsheet && mode === 'spreadsheet') {
+        const jsonMatch = rawText.match(/```json\s*([\s\S]*?)```/);
+        if (jsonMatch) {
+          try {
+            const potential = JSON.parse(jsonMatch[1]);
+            if (potential.headers && potential.rows) {
+              parsedSpreadsheet = potential;
+            }
+          } catch (e) {
+            console.error('Parse fallback spreadsheet error', e);
+          }
+        }
+      }
+
+      if (!parsedApk && mode === 'apk') {
+        const jsonMatch = rawText.match(/```json\s*([\s\S]*?)```/);
+        if (jsonMatch) {
+          try {
+            const potential = JSON.parse(jsonMatch[1]);
+            if (potential.appName && potential.files) {
+              parsedApk = potential;
+            }
+          } catch (e) {
+            console.error('Parse fallback APK error', e);
+          }
+        }
+      }
+
+      const assistantMessage: ChatMessage = {
+        id: `msg_${getNow()}`,
+        role: 'assistant',
+        content: rawText,
+        timestamp: getTimestamp(),
+        mode,
+        language,
+        spreadsheetData: parsedSpreadsheet,
+        apkData: parsedApk,
+        generatedImages: data.generatedImage ? [data.generatedImage] : undefined
+      };
+
+      const finalMessages = [...updatedMessages, assistantMessage];
+      const finalConv: Conversation = {
+        ...updatedConv,
+        messages: finalMessages,
+        updatedAt: getISODate()
+      };
+
+      setConversations(prev => prev.map(c => c.id === activeConversationId ? finalConv : c));
+
+      // Record Audit Log & update Admin Metrics
+      const newLog: AuditLog = {
+        id: `log_${getNow()}`,
+        timestamp: getLocaleString(),
+        userEmail: currentUser?.email || 'anon@ocypus.ai',
+        action: mode === 'apk' ? 'apk_generate' : mode === 'spreadsheet' ? 'spreadsheet_export' : mode === 'code' ? 'code_generate' : 'chat',
+        tokensUsed: Math.floor(rawText.length / 4) + 150,
+        durationMs: latency,
+        status: 'success',
+        details: text.slice(0, 60)
+      };
+
+      setAuditLogs(prev => [newLog, ...prev.slice(0, 40)]);
+      setMetrics(prev => ({
+        ...prev,
+        totalRequestsToday: prev.totalRequestsToday + 1,
+        totalTokensUsed: prev.totalTokensUsed + newLog.tokensUsed,
+        totalApksBuilt: mode === 'apk' ? prev.totalApksBuilt + 1 : prev.totalApksBuilt,
+        totalSpreadsheetsGenerated: (mode === 'spreadsheet' || parsedSpreadsheet) ? prev.totalSpreadsheetsGenerated + 1 : prev.totalSpreadsheetsGenerated,
+        totalPdfsProcessed: (attachments && attachments.length > 0) ? prev.totalPdfsProcessed + attachments.length : prev.totalPdfsProcessed
+      }));
+
+      // Background Supabase Sync
+      syncConversationToSupabase(finalConv, currentUser?.id).catch(() => {});
+      syncAuditLogToSupabase(newLog).catch(() => {});
+
+    } catch (error) {
+      console.error('Chat error:', error);
+      const errorMessage: ChatMessage = {
+        id: `msg_err_${getNow()}`,
+        role: 'assistant',
+        content: '🐺 Houve uma oscilação na conexão com a IA Ocypus. Por favor tente novamente.',
+        timestamp: getTimestamp()
+      };
+      setConversations(prev => prev.map(c => 
+        c.id === activeConversationId ? { ...updatedConv, messages: [...updatedMessages, errorMessage] } : c
+      ));
+    } finally {
+      setIsLoading(false);
+    }
+  }, [activeConversation, activeConversationId, currentUser?.email, currentUser?.id, handleGenerateImageDirect]);
+
+  const handleToggleUserStatus = (userId: string) => {
+    setUsers(prev => prev.map(u => {
+      if (u.id === userId) {
+        return { ...u, status: u.status === 'active' ? 'blocked' : 'active' };
+      }
+      return u;
+    }));
+  };
+
+  return (
+    <div className="flex h-screen w-screen flex-col overflow-hidden bg-[#07080a] text-zinc-100 font-sans">
+      {/* Top Header */}
+      <Header
+        currentUser={currentUser}
+        onOpenAdmin={handleOpenAdmin}
+        onOpenAuth={() => setIsLoginScreenOpen(true)}
+        onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
+        activeMode={activeMode}
+        onSelectMode={(m) => setActiveMode(m)}
+      />
+
+      {/* Main Body */}
+      <div className="flex flex-1 overflow-hidden relative">
+        {/* Left History Sidebar */}
+        <Sidebar
+          conversations={conversations}
+          activeConversationId={activeConversationId}
+          onSelectConversation={(id) => setActiveConversationId(id)}
+          onNewConversation={(mode) => handleNewConversation(mode || 'general')}
+          onDeleteConversation={handleDeleteConversation}
+          isOpen={isSidebarOpen}
+          onClose={() => setIsSidebarOpen(false)}
+          onOpenAdmin={handleOpenAdmin}
+          isAdmin={currentUser?.role === 'admin'}
+        />
+
+        {/* Central Chat Interface */}
+        <ChatArea
+          conversation={activeConversation}
+          onSendMessage={handleSendMessage}
+          isLoading={isLoading}
+          activeMode={activeMode}
+          onSelectMode={(m) => setActiveMode(m)}
+          onOpenPdfModal={() => setIsPdfModalOpen(true)}
+          pendingAttachments={pendingAttachments}
+          onRemoveAttachment={(id) => setPendingAttachments(pendingAttachments.filter(a => a.id !== id))}
+          onGenerateImage={handleGenerateImageDirect}
+          isImageLoading={isImageLoading}
+        />
+      </div>
+
+      {/* Admin Verification Modal for /detxwolf.ADM */}
+      <AdminCommandModal
+        isOpen={isAdminCommandModalOpen}
+        onClose={() => setIsAdminCommandModalOpen(false)}
+        onUnlockSuccess={() => {
+          setIsAdminUnlocked(true);
+          try {
+            localStorage.setItem('ocypus_admin_unlocked', 'true');
+          } catch (e) {
+            console.warn(e);
+          }
+          setIsAdminOpen(true);
+        }}
+      />
+
+      {/* Admin Panel */}
+      <AdminPanel
+        isOpen={isAdminOpen}
+        onClose={() => setIsAdminOpen(false)}
+        users={users}
+        onToggleUserStatus={handleToggleUserStatus}
+        metrics={metrics}
+        auditLogs={auditLogs}
+      />
+
+      {/* Dedicated Login Screen */}
+      {isLoginScreenOpen && (
+        <LoginScreen
+          currentUser={currentUser}
+          onLoginSuccess={(user) => {
+            setCurrentUser(user);
+            try {
+              localStorage.setItem('ocypus_user', JSON.stringify(user));
+            } catch (e) {
+              console.warn(e);
+            }
+            setIsLoginScreenOpen(false);
+            syncUserToSupabase(user).catch(() => {});
+          }}
+          onContinueAsGuest={() => {
+            setIsLoginScreenOpen(false);
+          }}
+        />
+      )}
+
+      {/* Standard Profile/Auth Modal */}
+      <AuthModal
+        isOpen={isAuthOpen}
+        onClose={() => setIsAuthOpen(false)}
+        currentUser={currentUser}
+        onLoginSuccess={(user) => {
+          setCurrentUser(user);
+          try {
+            localStorage.setItem('ocypus_user', JSON.stringify(user));
+          } catch (e) {
+            console.warn(e);
+          }
+          syncUserToSupabase(user).catch(() => {});
+        }}
+        onLogout={() => {
+          signOutWithSupabase().catch(() => {});
+          setCurrentUser(null);
+          setIsAdminUnlocked(false);
+          try {
+            localStorage.removeItem('ocypus_user');
+            localStorage.removeItem('ocypus_admin_unlocked');
+          } catch (e) {
+            console.warn(e);
+          }
+          setIsLoginScreenOpen(true);
+        }}
+      />
+
+      {/* PDF Upload Modal */}
+      <PdfUploadModal
+        isOpen={isPdfModalOpen}
+        onClose={() => setIsPdfModalOpen(false)}
+        onAttachDocument={(att, autoPrompt) => {
+          setPendingAttachments(prev => [...prev, att]);
+          if (autoPrompt) {
+            handleSendMessage(autoPrompt, 'spreadsheet', undefined, [att]);
+          }
+        }}
+      />
+    </div>
+  );
+}
