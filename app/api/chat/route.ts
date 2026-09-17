@@ -74,134 +74,67 @@ No final da resposta, inclua um bloco json delimitado por \`\`\`json_spreadsheet
     }
 
     if (apiKey) {
-      try {
-        const ai = new GoogleGenAI({ apiKey });
+      const ai = new GoogleGenAI({ apiKey });
 
-        // Sanitize and format history strictly for Gemini multiturn conversation
-        const sanitizedHistory: { role: 'user' | 'model'; parts: { text: string }[] }[] = [];
+      // Build contents
+      const contents: any[] = [];
 
-        if (Array.isArray(history) && history.length > 0) {
-          const validItems = history.filter((h: any) => {
-            if (!h || typeof h.content !== 'string') return false;
-            const trimmed = h.content.trim();
-            if (!trimmed) return false;
-            // Filter out connection / oscillation error alerts
-            if (trimmed.includes('oscilação na conexão') || trimmed.includes('Erro ao processar')) return false;
-            return true;
+      // History
+      if (Array.isArray(history) && history.length > 0) {
+        history.slice(-6).forEach((h: any) => {
+          contents.push({
+            role: h.role === 'assistant' ? 'model' : 'user',
+            parts: [{ text: h.content }]
           });
-
-          for (const item of validItems) {
-            const role: 'user' | 'model' = item.role === 'assistant' ? 'model' : 'user';
-            const text = item.content.trim();
-
-            if (sanitizedHistory.length === 0) {
-              // Gemini multiturn conversations MUST start with a 'user' turn
-              if (role === 'user') {
-                sanitizedHistory.push({ role: 'user', parts: [{ text }] });
-              }
-            } else {
-              const last = sanitizedHistory[sanitizedHistory.length - 1];
-              if (last.role === role) {
-                // Merge parts to maintain strict role alternation
-                last.parts.push({ text });
-              } else {
-                sanitizedHistory.push({ role, parts: [{ text }] });
-              }
-            }
-          }
-        }
-
-        // Before appending the new user turn, ensure the last turn is not 'user'
-        if (sanitizedHistory.length > 0 && sanitizedHistory[sanitizedHistory.length - 1].role === 'user') {
-          sanitizedHistory.pop();
-        }
-
-        // Current prompt with attachments
-        const currentParts: { text: string }[] = [];
-        if (attachments && Array.isArray(attachments)) {
-          attachments.forEach((att: any) => {
-            if (att.extractedText) {
-              currentParts.push({
-                text: `[DOCUMENTO ANEXADO: ${att.name}]:\n${att.extractedText}\n---`
-              });
-            }
-          });
-        }
-
-        currentParts.push({ text: message });
-
-        const contents = [
-          ...sanitizedHistory.slice(-8),
-          {
-            role: 'user' as const,
-            parts: currentParts
-          }
-        ];
-
-        // Call Gemini using gemini-3.8-flash with fallback to gemini-flash-latest and timeout protection
-        let text = '';
-        const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 12000));
-
-        try {
-          const response = await Promise.race([
-            ai.models.generateContent({
-              model: 'gemini-3.8-flash',
-              contents,
-              config: {
-                systemInstruction,
-                temperature: 0.7,
-              }
-            }),
-            timeoutPromise
-          ]);
-          text = response?.text || '';
-        } catch (primaryModelErr: any) {
-          console.warn('Primary model gemini-3.8-flash failed, trying gemini-flash-latest:', primaryModelErr?.message);
-          try {
-            const fallbackResponse = await Promise.race([
-              ai.models.generateContent({
-                model: 'gemini-flash-latest',
-                contents,
-                config: {
-                  systemInstruction,
-                  temperature: 0.7,
-                }
-              }),
-              timeoutPromise
-            ]);
-            text = fallbackResponse?.text || '';
-          } catch (secondaryErr: any) {
-            console.warn('Fallback model failed as well:', secondaryErr?.message);
-          }
-        }
-
-        if (text && text.trim().length > 0) {
-          return NextResponse.json({
-            success: true,
-            text
-          });
-        }
-      } catch (geminiError: any) {
-        console.error('Gemini API call failed, generating intelligent local fallback:', geminiError?.message);
-        // Fall through to generateMockResponse so user never sees a connection failure
+        });
       }
+
+      // Current prompt with attachments
+      const currentParts: any[] = [];
+      if (attachments && Array.isArray(attachments)) {
+        attachments.forEach((att: any) => {
+          if (att.extractedText) {
+            currentParts.push({
+              text: `[DOCUMENTO ANEXADO: ${att.name}]:\n${att.extractedText}\n---`
+            });
+          }
+        });
+      }
+
+      currentParts.push({ text: message });
+      contents.push({
+        role: 'user',
+        parts: currentParts
+      });
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents,
+        config: {
+          systemInstruction,
+          temperature: 0.7,
+        }
+      });
+
+      const text = response.text || '';
+      return NextResponse.json({
+        success: true,
+        text
+      });
     }
 
-    // Intelligent fallback response if API key is absent or external API has an outage
+    // Fallback if no API key is provided
     return NextResponse.json({
       success: true,
-      text: generateMockResponse(message, mode, language, attachments),
-      isFallback: true
+      text: generateMockResponse(message, mode, language, attachments)
     });
 
   } catch (error: any) {
     console.error('Error in /api/chat:', error);
-    // Even in catch block, return a valid response rather than a 500 error
-    return NextResponse.json({
-      success: true,
-      text: '🐺 **Ocypus AI**: Olá! Recebi sua mensagem. Por favor, tente enviar novamente.',
-      isFallback: true
-    });
+    return NextResponse.json(
+      { error: error?.message || 'Erro ao processar requisição com a IA Ocypus' },
+      { status: 500 }
+    );
   }
 }
 
@@ -329,21 +262,6 @@ export function processOcypusMetrics(records: ItemRecord[]): { count: number; to
 \`\`\`
 
 Pronto para executar! Você pode copiar o código ou alternar entre as 10 linguagens suportadas a qualquer momento.`;
-  }
-
-  // Check for simple mathematical expression (e.g. "12-5", "12 - 5", "50 * 4")
-  const trimmed = message.trim();
-  const mathMatch = trimmed.replace(/\s+/g, '');
-  if (/^[-+]?\d+(\.\d+)?([+\-*/^%][-+]?\d+(\.\d+)?)+$/.test(mathMatch)) {
-    try {
-      const sanitized = mathMatch.replace(/\^/g, '**');
-      const calcResult = Function(`"use strict"; return (${sanitized});`)();
-      if (typeof calcResult === 'number' && !isNaN(calcResult)) {
-        return `O resultado da operação $${trimmed}$ é **${calcResult}**.`;
-      }
-    } catch {
-      // Fall through to general response
-    }
   }
 
   return `🐺 **Ocypus AI**: Recebi sua mensagem: "${message}".

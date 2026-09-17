@@ -355,53 +355,64 @@ export default function Home() {
           mode,
           language,
           attachments,
-          history: currentMsgs.map(m => ({ role: m.role, content: m.content })),
+          history: updatedMessages.map(m => ({ role: m.role, content: m.content })),
           isAdmin
         })
       });
 
       const data = await res.json();
       const latency = getNow() - startTime;
-      const rawText: string = data.text || '🐺 Solicitação processada com sucesso.';
+      const rawText: string = data.text || '';
 
       // Parse special structures (JSON APK or JSON Spreadsheet)
       let parsedSpreadsheet: SpreadsheetData | undefined;
       let parsedApk: ApkProjectData | undefined;
 
-      // 1. Try matching APK JSON block (```json_apk, ```json:apk, ```apk)
-      const apkMatch = rawText.match(/```(?:json_apk|json:apk|apk)\s*([\s\S]*?)```/);
-      if (apkMatch) {
-        try {
-          parsedApk = JSON.parse(apkMatch[1]);
-        } catch (e) {
-          console.error('Failed to parse APK project JSON', e);
-        }
-      }
-
-      // 2. Try matching Spreadsheet JSON block (```json_spreadsheet, ```json:spreadsheet, ```spreadsheet)
-      const spreadsheetMatch = rawText.match(/```(?:json_spreadsheet|json:spreadsheet|spreadsheet)\s*([\s\S]*?)```/);
-      if (spreadsheetMatch) {
-        try {
-          parsedSpreadsheet = JSON.parse(spreadsheetMatch[1]);
-        } catch (e) {
-          console.error('Failed to parse spreadsheet JSON', e);
-        }
-      }
-
-      // 3. Fallback: inspect generic ```json blocks
-      if (!parsedSpreadsheet || !parsedApk) {
-        const genericMatches = [...rawText.matchAll(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/g)];
-        for (const match of genericMatches) {
+      if (rawText.includes('```json:spreadsheet') || rawText.includes('```json:apk')) {
+        const spreadsheetMatch = rawText.match(/```json:spreadsheet\s*([\s\S]*?)```/);
+        if (spreadsheetMatch) {
           try {
-            const potential = JSON.parse(match[1]);
-            if (!parsedSpreadsheet && potential.headers && Array.isArray(potential.rows)) {
+            parsedSpreadsheet = JSON.parse(spreadsheetMatch[1]);
+          } catch (e) {
+            console.error('Failed to parse spreadsheet JSON', e);
+          }
+        }
+
+        const apkMatch = rawText.match(/```json:apk\s*([\s\S]*?)```/);
+        if (apkMatch) {
+          try {
+            parsedApk = JSON.parse(apkMatch[1]);
+          } catch (e) {
+            console.error('Failed to parse APK project JSON', e);
+          }
+        }
+      }
+
+      // Also check standard json block if mode matches
+      if (!parsedSpreadsheet && mode === 'spreadsheet') {
+        const jsonMatch = rawText.match(/```json\s*([\s\S]*?)```/);
+        if (jsonMatch) {
+          try {
+            const potential = JSON.parse(jsonMatch[1]);
+            if (potential.headers && potential.rows) {
               parsedSpreadsheet = potential;
             }
-            if (!parsedApk && potential.appName && Array.isArray(potential.files)) {
+          } catch (e) {
+            console.error('Parse fallback spreadsheet error', e);
+          }
+        }
+      }
+
+      if (!parsedApk && mode === 'apk') {
+        const jsonMatch = rawText.match(/```json\s*([\s\S]*?)```/);
+        if (jsonMatch) {
+          try {
+            const potential = JSON.parse(jsonMatch[1]);
+            if (potential.appName && potential.files) {
               parsedApk = potential;
             }
-          } catch {
-            // Ignore non-matching blocks
+          } catch (e) {
+            console.error('Parse fallback APK error', e);
           }
         }
       }
@@ -455,24 +466,10 @@ export default function Home() {
 
     } catch (error) {
       console.error('Chat error:', error);
-      // Smart offline fallback for math expressions
-      const cleanMath = text.trim().replace(/\s+/g, '');
-      let fallbackText = '🐺 Houve uma oscilação temporária de rede. Por favor, tente enviar novamente.';
-      if (/^[-+]?\d+(\.\d+)?([+\-*/^%][-+]?\d+(\.\d+)?)+$/.test(cleanMath)) {
-        try {
-          const sanitized = cleanMath.replace(/\^/g, '**');
-          const calcResult = Function(`"use strict"; return (${sanitized});`)();
-          if (typeof calcResult === 'number' && !isNaN(calcResult)) {
-            fallbackText = `O resultado da operação $${text.trim()}$ é **${calcResult}**.`;
-          }
-        } catch {
-          // ignore
-        }
-      }
       const errorMessage: ChatMessage = {
         id: `msg_err_${getNow()}`,
         role: 'assistant',
-        content: fallbackText,
+        content: '🐺 Houve uma oscilação na conexão com a IA Ocypus. Por favor tente novamente.',
         timestamp: getTimestamp()
       };
       setConversations(prev => prev.map(c => 
