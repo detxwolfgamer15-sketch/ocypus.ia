@@ -152,27 +152,19 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Right side: Admin Panel trigger + Login Screen + User Profile */}
       <div className="flex items-center gap-2 sm:gap-3">
-        {/* Admin Panel Button with Lock/Unlock logic */}
-        <button
-          id="btn-header-admin-panel"
-          onClick={isAdminUnlocked ? onOpenAdmin : onRequestAdmin}
-          className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-all shadow-[0_0_12px_rgba(220,38,38,0.2)] ${
-            isAdminUnlocked
-              ? 'border-red-700/80 bg-red-950/60 text-red-300 hover:bg-red-900/80 hover:text-white shadow-[0_0_15px_rgba(220,38,38,0.4)]'
-              : 'border-red-950 bg-red-950/20 text-zinc-400 hover:border-red-700/60 hover:text-red-300'
-          }`}
-          title={isAdminUnlocked ? "Painel de Controle Admin (Liberado)" : "Acesso Restrito: Requer comando /detxwolf.ADM"}
-        >
-          {isAdminUnlocked ? (
-            <Unlock className="h-4 w-4 text-emerald-400" />
-          ) : (
-            <Lock className="h-3.5 w-3.5 text-red-500" />
-          )}
-          <span className="hidden sm:inline">
-            {isAdminUnlocked ? 'Painel Admin' : 'ADM (/detxwolf.ADM)'}
-          </span>
-          <span className="sm:hidden text-[10px]">ADM</span>
-        </button>
+        {/* Admin Panel Button - ONLY rendered for users with admin permissions */}
+        {(isAdminUnlocked || currentUser?.role === 'admin') && (
+          <button
+            id="btn-header-admin-panel"
+            onClick={onOpenAdmin}
+            className="flex items-center gap-1.5 rounded-lg border border-red-700/80 bg-red-950/60 px-3 py-1.5 text-xs font-semibold text-red-300 hover:bg-red-900/80 hover:text-white transition-all shadow-[0_0_15px_rgba(220,38,38,0.4)]"
+            title="Painel de Controle Administrativo"
+          >
+            <Shield className="h-3.5 w-3.5 text-red-400" />
+            <span className="hidden sm:inline">Painel Admin</span>
+            <span className="sm:hidden text-[10px]">Admin</span>
+          </button>
+        )}
 
         {/* Dedicated Login Screen Trigger Button */}
         <button

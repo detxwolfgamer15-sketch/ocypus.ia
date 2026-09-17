@@ -93,7 +93,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
       
       {/* Messages Scroll Area */}
       <div className="flex-1 overflow-y-auto px-4 py-6 sm:px-6 md:px-10 scrollbar-thin scrollbar-thumb-red-950">
-        {!conversation || conversation.messages.length === 0 ? (
+        {!conversation || !conversation.messages || conversation.messages.length === 0 ? (
           /* Welcome Banner & Quick Action Cards */
           <div className="flex min-h-full flex-col items-center justify-center max-w-3xl mx-auto text-center py-8">
             <div className="relative h-28 w-28 overflow-hidden rounded-3xl border-2 border-red-600/60 bg-black shadow-[0_0_40px_rgba(220,38,38,0.4)] mb-4">
@@ -195,7 +195,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
           </div>
         ) : (
           <div className="max-w-4xl mx-auto space-y-4">
-            {conversation.messages.map((msg) => (
+            {(conversation?.messages || []).map((msg) => (
               <MessageItem
                 key={msg.id}
                 message={msg}

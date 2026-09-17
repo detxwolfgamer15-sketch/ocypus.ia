@@ -95,29 +95,17 @@ export const AdminCommandModal: React.FC<AdminCommandModalProps> = ({
           <div className="rounded-xl border border-red-900/40 bg-red-950/20 p-3.5 text-xs text-zinc-300 space-y-1.5">
             <div className="flex items-center gap-2 font-bold text-red-400">
               <Lock className="h-4 w-4" />
-              <span>Comando Obrigatório de Acesso</span>
+              <span>Chave de Acesso Administrativo</span>
             </div>
             <p className="text-zinc-400">
-              Para liberar o Painel de Controle e as configurações de administrador, digite o comando de autorização abaixo:
+              Digite o código ou comando confidencial de autorização para autenticar os privilégios de superadministrador.
             </p>
-            <div className="flex items-center gap-2 pt-1">
-              <span className="text-zinc-400 text-[11px]">Comando:</span>
-              <button
-                type="button"
-                onClick={() => setCommandInput('/detxwolf.ADM')}
-                className="font-mono font-black text-xs text-red-400 bg-black/80 px-2 py-0.5 rounded border border-red-700/60 hover:border-red-500 hover:bg-red-950/40 transition-all cursor-pointer"
-                title="Clique para preencher automaticamente"
-              >
-                /detxwolf.ADM
-              </button>
-              <span className="text-[10px] text-zinc-500">(clique para preencher)</span>
-            </div>
           </div>
 
           <form onSubmit={handleVerify} className="space-y-4">
             <div>
               <label className="text-xs font-semibold text-zinc-300 mb-1.5 block">
-                Digite o comando de autorização:
+                Comando / Chave de Segurança:
               </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-red-500">
@@ -125,13 +113,13 @@ export const AdminCommandModal: React.FC<AdminCommandModalProps> = ({
                 </div>
                 <input
                   ref={inputRef}
-                  type="text"
+                  type="password"
                   value={commandInput}
                   onChange={(e) => {
                     setCommandInput(e.target.value);
                     if (errorMsg) setErrorMsg('');
                   }}
-                  placeholder="/detxwolf.ADM"
+                  placeholder="Digite o comando de autorização..."
                   className="w-full rounded-xl border border-[#39151e] bg-[#12141c] py-2.5 pl-9 pr-4 text-xs font-mono text-white placeholder:text-zinc-600 focus:border-red-600 focus:outline-none focus:ring-1 focus:ring-red-600 transition-colors"
                 />
               </div>

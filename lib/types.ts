@@ -111,6 +111,7 @@ export interface Conversation {
   updatedAt: string;
   messages: ChatMessage[];
   category?: 'Hoje' | 'Ontem' | 'Esta Semana' | 'Anteriores';
+  mode?: AppMode;
 }
 
 export interface AuditLog {

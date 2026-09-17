@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { 
   Conversation, 
   ChatMessage, 
@@ -152,7 +152,23 @@ export default function Home() {
     }
   }, [activeConversationId, isLoaded]);
 
-  const activeConversation = conversations.find(c => c.id === activeConversationId) || conversations[0];
+  const fallbackConversation: Conversation = useMemo(() => ({
+    id: 'conv_default',
+    title: 'Nova Conversa Ocypus',
+    createdAt: getISODate(),
+    updatedAt: getISODate(),
+    category: 'Hoje',
+    mode: 'general',
+    messages: []
+  }), []);
+
+  const activeConversation: Conversation = useMemo(() => {
+    return conversations.find(c => c.id === activeConversationId) || conversations[0] || fallbackConversation;
+  }, [conversations, activeConversationId, fallbackConversation]);
+
+  const isAdmin = useMemo(() => {
+    return Boolean(isAdminUnlocked || currentUser?.role === 'admin');
+  }, [isAdminUnlocked, currentUser?.role]);
 
   const handleNewConversation = useCallback((mode: AppMode = 'general') => {
     const newId = `conv_${getNow()}`;
@@ -181,6 +197,20 @@ export default function Home() {
   const handleDeleteConversation = useCallback((id: string) => {
     setConversations(prev => {
       const updated = prev.filter(c => c.id !== id);
+      if (updated.length === 0) {
+        const freshId = `conv_${getNow()}`;
+        const freshConv: Conversation = {
+          id: freshId,
+          title: 'Nova Conversa Ocypus',
+          createdAt: getISODate(),
+          updatedAt: getISODate(),
+          category: 'Hoje',
+          mode: 'general',
+          messages: []
+        };
+        setActiveConversationId(freshId);
+        return [freshConv];
+      }
       return updated;
     });
     setActiveConversationId(prevId => {
@@ -295,12 +325,13 @@ export default function Home() {
     }
 
     // Update conversation with user message
-    const updatedMessages = [...(activeConversation?.messages || []), userMessage];
+    const currentMsgs = activeConversation?.messages || [];
+    const updatedMessages = [...currentMsgs, userMessage];
     const updatedConv: Conversation = {
       ...activeConversation,
       messages: updatedMessages,
       updatedAt: getISODate(),
-      title: activeConversation.messages.length === 0 ? text.slice(0, 30) + '...' : activeConversation.title
+      title: currentMsgs.length === 0 ? text.slice(0, 30) + '...' : (activeConversation.title || 'Conversa')
     };
 
     setConversations(prev => prev.map(c => c.id === activeConversationId ? updatedConv : c));
@@ -324,63 +355,53 @@ export default function Home() {
           mode,
           language,
           attachments,
-          history: updatedMessages.map(m => ({ role: m.role, content: m.content }))
+          history: currentMsgs.map(m => ({ role: m.role, content: m.content })),
+          isAdmin
         })
       });
 
       const data = await res.json();
       const latency = getNow() - startTime;
-      const rawText: string = data.text || '';
+      const rawText: string = data.text || '🐺 Solicitação processada com sucesso.';
 
       // Parse special structures (JSON APK or JSON Spreadsheet)
       let parsedSpreadsheet: SpreadsheetData | undefined;
       let parsedApk: ApkProjectData | undefined;
 
-      if (rawText.includes('```json:spreadsheet') || rawText.includes('```json:apk')) {
-        const spreadsheetMatch = rawText.match(/```json:spreadsheet\s*([\s\S]*?)```/);
-        if (spreadsheetMatch) {
-          try {
-            parsedSpreadsheet = JSON.parse(spreadsheetMatch[1]);
-          } catch (e) {
-            console.error('Failed to parse spreadsheet JSON', e);
-          }
-        }
-
-        const apkMatch = rawText.match(/```json:apk\s*([\s\S]*?)```/);
-        if (apkMatch) {
-          try {
-            parsedApk = JSON.parse(apkMatch[1]);
-          } catch (e) {
-            console.error('Failed to parse APK project JSON', e);
-          }
+      // 1. Try matching APK JSON block (```json_apk, ```json:apk, ```apk)
+      const apkMatch = rawText.match(/```(?:json_apk|json:apk|apk)\s*([\s\S]*?)```/);
+      if (apkMatch) {
+        try {
+          parsedApk = JSON.parse(apkMatch[1]);
+        } catch (e) {
+          console.error('Failed to parse APK project JSON', e);
         }
       }
 
-      // Also check standard json block if mode matches
-      if (!parsedSpreadsheet && mode === 'spreadsheet') {
-        const jsonMatch = rawText.match(/```json\s*([\s\S]*?)```/);
-        if (jsonMatch) {
+      // 2. Try matching Spreadsheet JSON block (```json_spreadsheet, ```json:spreadsheet, ```spreadsheet)
+      const spreadsheetMatch = rawText.match(/```(?:json_spreadsheet|json:spreadsheet|spreadsheet)\s*([\s\S]*?)```/);
+      if (spreadsheetMatch) {
+        try {
+          parsedSpreadsheet = JSON.parse(spreadsheetMatch[1]);
+        } catch (e) {
+          console.error('Failed to parse spreadsheet JSON', e);
+        }
+      }
+
+      // 3. Fallback: inspect generic ```json blocks
+      if (!parsedSpreadsheet || !parsedApk) {
+        const genericMatches = [...rawText.matchAll(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/g)];
+        for (const match of genericMatches) {
           try {
-            const potential = JSON.parse(jsonMatch[1]);
-            if (potential.headers && potential.rows) {
+            const potential = JSON.parse(match[1]);
+            if (!parsedSpreadsheet && potential.headers && Array.isArray(potential.rows)) {
               parsedSpreadsheet = potential;
             }
-          } catch (e) {
-            console.error('Parse fallback spreadsheet error', e);
-          }
-        }
-      }
-
-      if (!parsedApk && mode === 'apk') {
-        const jsonMatch = rawText.match(/```json\s*([\s\S]*?)```/);
-        if (jsonMatch) {
-          try {
-            const potential = JSON.parse(jsonMatch[1]);
-            if (potential.appName && potential.files) {
+            if (!parsedApk && potential.appName && Array.isArray(potential.files)) {
               parsedApk = potential;
             }
-          } catch (e) {
-            console.error('Parse fallback APK error', e);
+          } catch {
+            // Ignore non-matching blocks
           }
         }
       }
@@ -434,10 +455,24 @@ export default function Home() {
 
     } catch (error) {
       console.error('Chat error:', error);
+      // Smart offline fallback for math expressions
+      const cleanMath = text.trim().replace(/\s+/g, '');
+      let fallbackText = '🐺 Houve uma oscilação temporária de rede. Por favor, tente enviar novamente.';
+      if (/^[-+]?\d+(\.\d+)?([+\-*/^%][-+]?\d+(\.\d+)?)+$/.test(cleanMath)) {
+        try {
+          const sanitized = cleanMath.replace(/\^/g, '**');
+          const calcResult = Function(`"use strict"; return (${sanitized});`)();
+          if (typeof calcResult === 'number' && !isNaN(calcResult)) {
+            fallbackText = `O resultado da operação $${text.trim()}$ é **${calcResult}**.`;
+          }
+        } catch {
+          // ignore
+        }
+      }
       const errorMessage: ChatMessage = {
         id: `msg_err_${getNow()}`,
         role: 'assistant',
-        content: '🐺 Houve uma oscilação na conexão com a IA Ocypus. Por favor tente novamente.',
+        content: fallbackText,
         timestamp: getTimestamp()
       };
       setConversations(prev => prev.map(c => 
@@ -446,7 +481,7 @@ export default function Home() {
     } finally {
       setIsLoading(false);
     }
-  }, [activeConversation, activeConversationId, currentUser?.email, currentUser?.id, handleGenerateImageDirect]);
+  }, [activeConversation, activeConversationId, currentUser?.email, currentUser?.id, handleGenerateImageDirect, isAdmin]);
 
   const handleToggleUserStatus = (userId: string) => {
     setUsers(prev => prev.map(u => {
@@ -468,7 +503,7 @@ export default function Home() {
         activeMode={activeMode}
         onSelectMode={(m) => setActiveMode(m)}
         onRequestAdmin={handleOpenAdmin}
-        isAdminUnlocked={isAdminUnlocked}
+        isAdminUnlocked={isAdmin}
         onOpenLoginScreen={() => setIsLoginScreenOpen(true)}
       />
 
@@ -484,7 +519,8 @@ export default function Home() {
           isOpen={isSidebarOpen}
           onClose={() => setIsSidebarOpen(false)}
           onOpenAdmin={handleOpenAdmin}
-          isAdmin={currentUser?.role === 'admin'}
+          isAdmin={isAdmin}
+          isAdminUnlocked={isAdmin}
         />
 
         {/* Central Chat Interface */}

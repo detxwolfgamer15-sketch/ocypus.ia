@@ -181,37 +181,29 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <span>Criar Imagem IA</span>
           </button>
 
-          <div className="pt-2 space-y-1.5">
-            <button
-              id="btn-sidebar-admin"
-              onClick={() => {
-                if (isAdminUnlocked) {
+          {(isAdmin || isAdminUnlocked) && (
+            <div className="pt-2 space-y-1.5">
+              <button
+                id="btn-sidebar-admin"
+                onClick={() => {
                   onOpenAdmin();
-                } else if (onRequestAdmin) {
-                  onRequestAdmin();
-                } else {
-                  onOpenAdmin();
-                }
-                if (window.innerWidth < 768) onClose();
-              }}
-              className={`flex w-full items-center justify-between rounded-lg border px-2.5 py-2 text-xs font-semibold transition-all ${
-                isAdminUnlocked
-                  ? 'border-red-700/70 bg-red-950/40 text-red-300 hover:bg-red-900/50 hover:text-white'
-                  : 'border-red-950 bg-red-950/20 text-zinc-400 hover:border-red-800/60 hover:text-red-300'
-              }`}
-            >
-              <div className="flex items-center gap-2 truncate">
-                <ShieldAlert className="h-4 w-4 text-red-400 flex-shrink-0" />
-                <span className="truncate">
-                  {isAdminUnlocked ? 'Painel Admin' : 'ADM (/detxwolf.ADM)'}
+                  if (window.innerWidth < 768) onClose();
+                }}
+                className="flex w-full items-center justify-between rounded-lg border border-red-700/70 bg-red-950/40 px-2.5 py-2 text-xs font-semibold text-red-300 hover:bg-red-900/50 hover:text-white transition-all shadow-[0_0_12px_rgba(220,38,38,0.2)]"
+              >
+                <div className="flex items-center gap-2 truncate">
+                  <ShieldAlert className="h-4 w-4 text-red-400 flex-shrink-0" />
+                  <span className="truncate">Painel Administrativo</span>
+                </div>
+                <span className="font-mono text-[9px] text-red-300 bg-red-900/50 px-1.5 py-0.5 rounded border border-red-700/50 flex-shrink-0">
+                  ROOT
                 </span>
-              </div>
-              <span className="font-mono text-[9px] text-red-400 bg-black/40 px-1 py-0.5 rounded border border-red-900/40 flex-shrink-0">
-                {isAdminUnlocked ? 'UNLOCKED' : 'LOCKED'}
-              </span>
-            </button>
+              </button>
+            </div>
+          )}
 
-            {onOpenLoginScreen && (
+          {onOpenLoginScreen && (
+            <div className="pt-1.5">
               <button
                 id="btn-sidebar-login-screen"
                 onClick={() => {
@@ -223,8 +215,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <Terminal className="h-3.5 w-3.5 text-red-400" />
                 <span>Tela de Login</span>
               </button>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       </aside>
     </>

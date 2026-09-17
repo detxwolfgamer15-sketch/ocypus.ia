@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import Image from 'next/image';
 import { UserAccount, AuditLog, AdminMetrics } from '@/lib/types';
-import { testSupabaseConnection, isSupabaseConfigured } from '@/lib/supabase';
+import { testSupabaseConnection, isSupabaseConfigured, SupabaseConnectionStatus } from '@/lib/supabase';
 import { 
   ShieldAlert, 
   Users, 
@@ -53,12 +53,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [userSearch, setUserSearch] = useState('');
   const [logFilter, setLogFilter] = useState('all');
   const [isTestingSupabase, setIsTestingSupabase] = useState(false);
-  const [supabaseTestResult, setSupabaseTestResult] = useState<{
-    connected: boolean;
-    latencyMs: number;
-    message: string;
-    configured: boolean;
-  } | null>(null);
+  const [supabaseTestResult, setSupabaseTestResult] = useState<SupabaseConnectionStatus | null>(null);
   const [isCopiedMigration, setIsCopiedMigration] = useState(false);
 
   if (!isOpen) return null;
@@ -112,60 +107,60 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         </div>
 
         {/* Tab Navigation */}
-        <div className="flex items-center gap-2 border-b border-[#221016] bg-[#0c0e14] px-6 py-2">
+        <div className="flex items-center gap-2 border-b border-[#221016] bg-[#0c0e14] px-3 sm:px-6 py-2 overflow-x-auto scrollbar-none">
           <button
             onClick={() => setActiveTab('overview')}
-            className={`flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition-all ${
+            className={`flex items-center gap-2 rounded-xl px-3 sm:px-4 py-2 text-xs font-bold whitespace-nowrap transition-all ${
               activeTab === 'overview'
                 ? 'bg-red-600 text-white shadow-[0_0_15px_rgba(220,38,38,0.4)]'
                 : 'text-zinc-400 hover:bg-[#181116] hover:text-zinc-200'
             }`}
           >
             <BarChart3 className="h-4 w-4" />
-            <span>Visão Geral & KPIs</span>
+            <span>Visão Geral</span>
           </button>
 
           <button
             onClick={() => setActiveTab('users')}
-            className={`flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition-all ${
+            className={`flex items-center gap-2 rounded-xl px-3 sm:px-4 py-2 text-xs font-bold whitespace-nowrap transition-all ${
               activeTab === 'users'
                 ? 'bg-red-600 text-white shadow-[0_0_15px_rgba(220,38,38,0.4)]'
                 : 'text-zinc-400 hover:bg-[#181116] hover:text-zinc-200'
             }`}
           >
             <Users className="h-4 w-4" />
-            <span>Gestão de Usuários ({users.length})</span>
+            <span>Usuários ({users.length})</span>
           </button>
 
           <button
             onClick={() => setActiveTab('logs')}
-            className={`flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition-all ${
+            className={`flex items-center gap-2 rounded-xl px-3 sm:px-4 py-2 text-xs font-bold whitespace-nowrap transition-all ${
               activeTab === 'logs'
                 ? 'bg-red-600 text-white shadow-[0_0_15px_rgba(220,38,38,0.4)]'
                 : 'text-zinc-400 hover:bg-[#181116] hover:text-zinc-200'
             }`}
           >
             <Activity className="h-4 w-4" />
-            <span>Logs de Auditoria</span>
+            <span>Logs</span>
           </button>
 
           <button
             id="tab-admin-settings"
             onClick={() => setActiveTab('settings')}
-            className={`flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition-all ${
+            className={`flex items-center gap-2 rounded-xl px-3 sm:px-4 py-2 text-xs font-bold whitespace-nowrap transition-all ${
               activeTab === 'settings'
                 ? 'bg-red-600 text-white shadow-[0_0_15px_rgba(220,38,38,0.4)]'
                 : 'text-zinc-400 hover:bg-[#181116] hover:text-zinc-200'
             }`}
           >
             <Sliders className="h-4 w-4" />
-            <span>Configurações & IA</span>
+            <span>Configurações</span>
           </button>
 
           <button
             id="tab-admin-database"
             onClick={() => setActiveTab('database')}
-            className={`flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition-all ${
+            className={`flex items-center gap-2 rounded-xl px-3 sm:px-4 py-2 text-xs font-bold whitespace-nowrap transition-all ${
               activeTab === 'database'
                 ? 'bg-red-600 text-white shadow-[0_0_15px_rgba(220,38,38,0.4)]'
                 : 'text-zinc-400 hover:bg-[#181116] hover:text-zinc-200'
@@ -173,7 +168,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           >
             <Database className="h-4 w-4" />
             <span className="flex items-center gap-1.5">
-              <span>Supabase & Banco</span>
+              <span>Banco de Dados</span>
               <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
             </span>
           </button>
@@ -594,7 +589,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     <div className="font-semibold flex items-center gap-1.5 mb-1">
                       <CheckCircle className="h-4 w-4" />
                       <span>{supabaseTestResult.connected ? 'Status: Conectado com Sucesso' : 'Status da Conexão'}</span>
-                      {supabaseTestResult.latencyMs > 0 && (
+                      {(supabaseTestResult.latencyMs ?? 0) > 0 && (
                         <span className="font-mono text-[11px] text-zinc-400">({supabaseTestResult.latencyMs}ms)</span>
                       )}
                     </div>
