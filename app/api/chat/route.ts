@@ -138,16 +138,29 @@ No final da resposta, inclua um bloco json delimitado por \`\`\`json_spreadsheet
           }
         ];
 
-        // Candidate models in preference order (with flash-lite for high demand 503 resilience)
-        const candidateModels = ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
+        // Call Gemini using gemini-3.8-flash with fallback to gemini-flash-latest and timeout protection
         let text = '';
+        const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 12000));
 
-        for (const modelName of candidateModels) {
+        try {
+          const response = await Promise.race([
+            ai.models.generateContent({
+              model: 'gemini-3.8-flash',
+              contents,
+              config: {
+                systemInstruction,
+                temperature: 0.7,
+              }
+            }),
+            timeoutPromise
+          ]);
+          text = response?.text || '';
+        } catch (primaryModelErr: any) {
+          console.warn('Primary model gemini-3.8-flash failed, trying gemini-flash-latest:', primaryModelErr?.message);
           try {
-            const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 8000));
-            const response = await Promise.race([
+            const fallbackResponse = await Promise.race([
               ai.models.generateContent({
-                model: modelName,
+                model: 'gemini-flash-latest',
                 contents,
                 config: {
                   systemInstruction,
@@ -156,14 +169,9 @@ No final da resposta, inclua um bloco json delimitado por \`\`\`json_spreadsheet
               }),
               timeoutPromise
             ]);
-
-            if (response && response.text && response.text.trim().length > 0) {
-              text = response.text;
-              break;
-            }
-          } catch {
-            // Seamlessly failover to next candidate model if current model experiences high demand or temporary 503
-            continue;
+            text = fallbackResponse?.text || '';
+          } catch (secondaryErr: any) {
+            console.warn('Fallback model failed as well:', secondaryErr?.message);
           }
         }
 
@@ -173,7 +181,8 @@ No final da resposta, inclua um bloco json delimitado por \`\`\`json_spreadsheet
             text
           });
         }
-      } catch {
+      } catch (geminiError: any) {
+        console.error('Gemini API call failed, generating intelligent local fallback:', geminiError?.message);
         // Fall through to generateMockResponse so user never sees a connection failure
       }
     }
@@ -185,7 +194,8 @@ No final da resposta, inclua um bloco json delimitado por \`\`\`json_spreadsheet
       isFallback: true
     });
 
-  } catch {
+  } catch (error: any) {
+    console.error('Error in /api/chat:', error);
     // Even in catch block, return a valid response rather than a 500 error
     return NextResponse.json({
       success: true,
